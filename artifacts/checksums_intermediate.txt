@@ -1,0 +1,1 @@
+e29977db731dd6bf19ca94cbe12b96cb8a00fcd06e5af1a271802634a30b73cb  target/wasm32-unknown-unknown/release/ibc_native_swap.wasm

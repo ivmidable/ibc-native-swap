@@ -1,0 +1,53 @@
+[workspace]
+members = ["contracts/*"]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Richard Vade <ivmidable@gmail.com>"]
+edition = "2018"
+
+exclude = [
+  # Those files are rust-optimizer artifacts. You might want to commit them for convenience but they should not be part of the source code publication.
+  "contract.wasm",
+  "hash.txt",
+]
+
+
+[profile.release.package.ibc-native-swap]
+codegen-units = 1
+incremental = false
+
+
+[workspace.dependencies]
+cosmwasm-schema  = "1.1.9"
+cosmwasm-std     = "1.1.9"
+cosmwasm-storage = "1.1.9"
+cw-storage-plus  = "1.0.1"
+cw-utils         = "1.0.0"
+cw-controllers   = "1.0.0"
+cw2              = "1.0.0"
+cw20             = "1.0.0"
+cw20-base        = "1.0.0"
+cw721            = "0.16.0"
+cw721-base       = "0.16.0"
+schemars         = "0.8.11"
+serde            = { version = "1.0.147", default-features = false, features = ["derive"] }
+thiserror        = "1.0.37"
+getrandom        = { version = "0.2.8", features = ["js"] }
+
+# dev deps
+cw-multi-test    = "0.16.1"
+
+[profile.release]
+rpath = false
+lto = true
+overflow-checks = true
+opt-level = 3
+debug = false
+debug-assertions = false
+
+[workspace.metadata.scripts]
+optimize = """docker run --rm -v "$(pwd)":/code \
+  --mount type=volume,source="$(basename "$(pwd)")_cache",target=/code/target \
+  --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
+  cosmwasm/workspace-optimizer:0.12.10"""

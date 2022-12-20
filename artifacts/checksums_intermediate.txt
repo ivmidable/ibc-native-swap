@@ -1,1 +1,2 @@
-e29977db731dd6bf19ca94cbe12b96cb8a00fcd06e5af1a271802634a30b73cb  target/wasm32-unknown-unknown/release/ibc_native_swap.wasm
+d5c52b11f2c82a4b2a5f45412f6db3665af3152988ae2f2b153ca5e31af2c708  target/wasm32-unknown-unknown/release/ibc_native_swap.wasm
+d65daf36854d4cc8b29058cf9632e28f71f6eeef944050b13919505400f99408  target/wasm32-unknown-unknown/release/ibc_orderbook.wasm

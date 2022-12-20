@@ -19,19 +19,18 @@ pub struct State {
 }
 
 #[cw_serde]
-pub struct Swap {
-    pub deposit: Token,
-    pub deposit_address: Addr,
-    pub deposit_transfer_channel_id: String,
-    pub ask: Token,
-    pub ask_address: Option<Addr>,
+pub struct Limit {
+    pub liquidty: Token,
+    pub liquidity_address: Addr,
+    pub liquidity_transfer_channel_id: String,
+    pub price_per_token: Token,
     pub ask_transfer_channel_id: String,
 }
 
 pub const STATE: Item<State> = Item::new("state");
 
-pub const SWAP_ID: Item<u64> = Item::new("swap_id");
+pub const LIMIT_ID: Item<u64> = Item::new("limit_id");
 
-pub const SWAPS_A: Map<u64, Swap> = Map::new("swaps_a");
+pub const LIMITS_A: Map<u64, Limit> = Map::new("limits_a");
 
-pub const SWAPS_B: Map<u64, Swap> = Map::new("swaps_b");
+pub const LIMITS_B: Map<u64, Limit> = Map::new("limits_b");

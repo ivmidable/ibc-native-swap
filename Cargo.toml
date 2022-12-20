@@ -17,6 +17,10 @@ exclude = [
 codegen-units = 1
 incremental = false
 
+[profile.release.package.ibc-orderbook]
+codegen-units = 1
+incremental = false
+
 
 [workspace.dependencies]
 cosmwasm-schema  = "1.1.9"

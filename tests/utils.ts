@@ -22,7 +22,8 @@ const {
 
 const osmosis = { ...oldOsmo, minFee: "0.025uosmo" };
 
-export const IbcVersion = "native-escrow-1";
+export const SwapIbcVersion = "native-swap-1";
+export const OrderbookIbcVersion = "orderbook-1";
 
 export async function setupContracts(
     cosmwasm: CosmWasmSigner,

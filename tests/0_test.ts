@@ -9,7 +9,8 @@ import { ClientRequest } from "http";
 import assert, { doesNotMatch } from "assert";
 
 import {
-    IbcVersion,
+    SwapIbcVersion,
+    OrderbookIbcVersion,
     setupContracts,
     setupOsmosisClient,
     setupOsmosisQueryClient,
@@ -28,12 +29,18 @@ interface SetupInfo {
     osmoClient: CosmWasmSigner;
     wasmSwap: string;
     osmoSwap: string;
+    wasmLimit: string;
+    osmoLimit: string;
     link: Link;
     ics20: {
         wasm: string;
         osmo: string;
     };
     channelIds: {
+        wasm: string;
+        osmo: string;
+    };
+    limitChannelIds: {
         wasm: string;
         osmo: string;
     };
@@ -72,8 +79,11 @@ const logger: Logger = {
   };
 
 async function demoSetup(): Promise<SetupInfo> {
-    // instantiate ica querier on wasmd
+    // setup clients
     const wasmClient = await setupWasmClient();
+    const osmoClient = await setupOsmosisClient();
+
+    //instantiating swap contract on wasmd
     const { contractAddress: wasmSwap } = await wasmClient.sign.instantiate(
         wasmClient.senderAddress,
         wasmIds.swap,
@@ -86,8 +96,8 @@ async function demoSetup(): Promise<SetupInfo> {
     );
     assert(wasmSwapPort);
 
-    // instantiate ica querier on osmosis
-    const osmoClient = await setupOsmosisClient();
+    // instantiate swap contract on osmosis
+    
     const { contractAddress: osmoSwap } = await osmoClient.sign.instantiate(
         osmoClient.senderAddress,
         osmosisIds.swap,
@@ -100,7 +110,7 @@ async function demoSetup(): Promise<SetupInfo> {
     );
     assert(osmoSwapPort);
 
-    // create a connection and channel for simple-ica
+    // create a connection and channel for ibc-swap
     const [src, dest] = await setup(wasmd, osmosis);
     const link = await Link.createWithNewConnections(src, dest);
     const channelInfo = await link.createChannel(
@@ -108,7 +118,7 @@ async function demoSetup(): Promise<SetupInfo> {
         wasmSwapPort,
         osmoSwapPort,
         Order.ORDER_UNORDERED,
-        IbcVersion
+        SwapIbcVersion
     );
     const channelIds = {
         wasm: channelInfo.src.channelId,
@@ -116,6 +126,49 @@ async function demoSetup(): Promise<SetupInfo> {
     };
 
     console.log(channelInfo);
+
+    //instantiate the limit contract on wasmd
+    const { contractAddress: wasmLimit } = await wasmClient.sign.instantiate(
+        wasmClient.senderAddress,
+        wasmIds.limit,
+        { packet_lifetime: 1000 },
+        "IBC Limit contract",
+        "auto"
+    );
+
+    const { ibcPortId: wasmLimitPort } = await wasmClient.sign.getContract(
+        wasmLimit
+    );
+    assert(wasmLimitPort);
+
+    //instantiate the limit contract on osmosis
+    const { contractAddress: osmoLimit } = await osmoClient.sign.instantiate(
+        osmoClient.senderAddress,
+        osmosisIds.limit,
+        { packet_lifetime: 1000 },
+        "IBC Limit contract",
+        "auto"
+    );
+
+    const { ibcPortId: osmoLimitPort } = await osmoClient.sign.getContract(
+        osmoLimit
+    );
+    assert(osmoLimitPort);
+
+    const limitChannelInfo = await link.createChannel(
+        "A",
+        wasmLimitPort,
+        osmoLimitPort,
+        Order.ORDER_UNORDERED,
+        OrderbookIbcVersion
+    );
+    const limitChannelIds = {
+        wasm: limitChannelInfo.src.channelId,
+        osmo: limitChannelInfo.src.channelId,
+    };
+
+    console.log(limitChannelInfo);
+
 
     // also create a ics20 channel on this connection
     const ics20Info = await link.createChannel(
@@ -136,16 +189,20 @@ async function demoSetup(): Promise<SetupInfo> {
         osmoClient,
         wasmSwap,
         osmoSwap,
+        wasmLimit,
+        osmoLimit,
         link,
         ics20,
         channelIds,
+        limitChannelIds,
     };
 }
 
 before(async () => {
     console.debug("Upload contracts to wasmd...");
     const wasmContracts = {
-        swap: "../artifacts/ibc_native_swap.wasm"
+        swap: "../artifacts/ibc_native_swap.wasm",
+        limit: "../artifacts/ibc_orderbook.wasm"
     };
     const wasmSign = await setupWasmClient();
     wasmIds = await setupContracts(wasmSign, wasmContracts);
@@ -153,21 +210,21 @@ before(async () => {
     console.debug("Upload contracts to osmosis...");
     const osmosisContracts = {
         swap: "../artifacts/ibc_native_swap.wasm",
+        limit: "../artifacts/ibc_orderbook.wasm"
     };
     const osmosisSign = await setupOsmosisClient();
     osmosisIds = await setupContracts(osmosisSign, osmosisContracts);
 });
 
 
-describe("ibc-native-swapTest", () => {
-    it("works", async () => {
+describe("ibc-tests", () => {
+    xit("ibc-native-swap", async () => {
         const {
             osmoClient,
             wasmClient,
             wasmSwap,
             osmoSwap,
             link,
-            channelIds,
             ics20
         } = await demoSetup();
 
@@ -225,6 +282,8 @@ describe("ibc-native-swapTest", () => {
         let wasmQueryClient = await setupWasmQueryClient();
         let osmoQueryClient = await setupOsmosisQueryClient();
 
+        await link.relayAll()
+
         let wasm_allBalances = await wasmQueryClient.getAllBalances(wasmClient.senderAddress);
         console.log(wasm_allBalances);
 
@@ -245,5 +304,79 @@ describe("ibc-native-swapTest", () => {
             console.log("Swap_b id:0 not found");
         }
 
+    });
+
+    it("ibc orderbook limit order", async () => {
+        const {
+            osmoClient,
+            wasmClient,
+            wasmLimit,
+            osmoLimit,
+            link,
+            ics20
+        } = await demoSetup();
+
+        const ibcCreate = await wasmClient.sign.execute(
+            wasmClient.senderAddress,
+            wasmLimit,
+            {
+                create_limit: {
+                    price_per_token: {
+                        amount: "10",
+                        denom: { native: "uosmo" }
+                    },
+                    liquidity_transfer_channel_id: ics20.wasm,
+                    ask_transfer_channel_id: ics20.osmo
+                },
+            },
+            "auto",
+            undefined,
+            [{ denom: "ucosm", amount: "1000000" }]
+        );
+        console.log(ibcCreate);
+
+        const info = await link.relayAll();
+        console.log(info);
+        console.log(fromUtf8(info.acksFromB[0].acknowledgement));
+
+        let wasmQuery = await wasmClient.sign.queryContractSmart(wasmLimit, { get_limit_order: { side: "A", id: 0 } });
+        console.log(wasmQuery);
+        let osmoQuery = await osmoClient.sign.queryContractSmart(osmoLimit, { get_limit_order: { side: "B", id: 0 } });
+        console.log(osmoQuery);
+
+        const ibcAccept = await osmoClient.sign.execute(
+            osmoClient.senderAddress,
+            osmoLimit,
+            {
+                accept_limit: {
+                    id: 0
+                },
+            },
+            "auto",
+            undefined,
+            [{ denom: "uosmo", amount: "10000" }]
+        );
+
+        console.log(ibcAccept);
+
+        const accept_info = await link.relayAll();
+        console.log(accept_info);
+        console.log(fromUtf8(accept_info.acksFromA[0].acknowledgement));
+
+        let wasmQueryClient = await setupWasmQueryClient();
+        let osmoQueryClient = await setupOsmosisQueryClient();
+
+        await link.relayAll()
+
+        let wasm_allBalances = await wasmQueryClient.getAllBalances(wasmClient.senderAddress);
+        console.log(wasm_allBalances);
+
+        let osmo_allBalances = await osmoQueryClient.getAllBalances(osmoClient.senderAddress);
+        console.log(osmo_allBalances);
+
+        let wasmQuery2 = await wasmClient.sign.queryContractSmart(wasmLimit, { get_limit_order: { side: "A", id: 0 } });
+        console.log(wasmQuery2);
+        let osmoQuery2 = await osmoClient.sign.queryContractSmart(osmoLimit, { get_limit_order: { side: "B", id: 0 } });
+        console.log(osmoQuery2);
     });
 });

@@ -1,7 +1,7 @@
 use cosmwasm_std::{
     entry_point, from_slice, Coin, DepsMut, Env, IbcBasicResponse, IbcChannelCloseMsg,
     IbcChannelConnectMsg, IbcChannelOpenMsg, IbcChannelOpenResponse, IbcMsg, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, StdResult,
+    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, StdResult, Uint128,
 };
 use cw20::Denom;
 
@@ -11,10 +11,9 @@ use crate::ibc_helpers::{validate_order_and_version, StdAck};
 
 use crate::error::ContractError;
 use crate::msg::PacketMsg;
-use crate::state::{Swap, STATE, SWAPS_A, SWAPS_B};
-//use crate::state::PENDING;
+use crate::state::{Limit, LIMITS_A, LIMITS_B, STATE};
 
-pub const IBC_VERSION: &str = "native-swap-1";
+pub const IBC_VERSION: &str = "orderbook-1";
 
 #[entry_point]
 /// enforces ordering and versioing constraints
@@ -93,46 +92,55 @@ pub fn ibc_packet_receive(
     }*/
 
     match packet_msg.unwrap() {
-        PacketMsg::CreateSideB { id, swap } => create_side_b(deps, env, id, swap, msg),
-        PacketMsg::AcceptSideA { id, sender } => accept_side_a(deps, env, id, sender, msg),
+        PacketMsg::CreateLimitB { id, limit } => create_limit_b(deps, env, id, limit, msg),
+        PacketMsg::AcceptLimitA { id, amount, sender } => {
+            accept_limit_a(deps, env, id, amount, sender, msg)
+        }
     }
 }
 
-pub fn create_side_b(
+pub fn create_limit_b(
     deps: DepsMut,
     _env: Env,
     id: u64,
-    swap: Swap,
+    limit: Limit,
     _msg: IbcPacketReceiveMsg,
 ) -> Result<IbcReceiveResponse, ContractError> {
-    SWAPS_B.save(deps.storage, id, &swap).unwrap();
+    LIMITS_B.save(deps.storage, id, &limit).unwrap();
     Ok(IbcReceiveResponse::new()
         .add_attribute("method", "ibc_packet_receive")
         .set_ack(StdAck::success(&id)))
 }
 
-pub fn accept_side_a(
+pub fn accept_limit_a(
     deps: DepsMut,
     env: Env,
     id: u64,
+    amount: Uint128,
     sender: String,
     _msg: IbcPacketReceiveMsg,
 ) -> Result<IbcReceiveResponse, ContractError> {
     let state = STATE.load(deps.storage)?;
-    let swap = SWAPS_A.load(deps.storage, id)?;
-    SWAPS_A.remove(deps.storage, id);
-    match swap.deposit.denom {
+    let mut limit = LIMITS_A.load(deps.storage, id)?;
+    match limit.liquidty.denom.clone() {
         Denom::Native(denom) => {
             let coin = Coin {
                 denom,
-                amount: swap.deposit.amount,
+                amount: amount.checked_div(limit.price_per_token.amount).unwrap(),
             };
             let transfer_msg = IbcMsg::Transfer {
-                channel_id: swap.deposit_transfer_channel_id,
+                channel_id: limit.liquidity_transfer_channel_id.clone(),
                 to_address: sender,
                 amount: coin,
                 timeout: env.block.time.plus_seconds(state.packet_lifetime).into(),
             };
+
+            limit.liquidty.amount = limit
+                .liquidty
+                .amount
+                .checked_sub(amount.checked_div(limit.price_per_token.amount).unwrap())
+                .unwrap();
+            LIMITS_A.save(deps.storage, id, &limit).unwrap();
 
             return Ok(IbcReceiveResponse::new()
                 .add_attribute("method", "ibc_packet_receive")
@@ -153,33 +161,40 @@ pub fn ibc_packet_ack(
     let original_packet: PacketMsg = from_slice(&msg.original_packet.data)?;
 
     match original_packet {
-        PacketMsg::AcceptSideA { id, sender: _ } => {
-            let swap = SWAPS_B.load(deps.storage, id)?;
-            SWAPS_B.remove(deps.storage, id);
+        PacketMsg::AcceptLimitA { id, amount, sender } => {
+            let mut limit = LIMITS_B.load(deps.storage, id)?;
             let state = STATE.load(deps.storage)?;
-            match swap.ask.denom {
+            match limit.price_per_token.denom.clone() {
                 Denom::Native(denom) => {
                     let coin = Coin {
                         denom,
-                        amount: swap.ask.amount,
+                        amount: amount,
                     };
                     let transfer_msg = IbcMsg::Transfer {
-                        channel_id: swap.ask_transfer_channel_id,
-                        to_address: swap.deposit_address.to_string(),
+                        channel_id: limit.ask_transfer_channel_id.clone(),
+                        to_address: limit.liquidity_address.to_string(),
                         amount: coin,
                         timeout: env.block.time.plus_seconds(state.packet_lifetime).into(),
                     };
 
+                    limit.liquidty.amount = limit
+                        .liquidty
+                        .amount
+                        .checked_sub(amount.checked_div(limit.price_per_token.amount).unwrap())
+                        .unwrap();
+
+                    LIMITS_B.save(deps.storage, id, &limit).unwrap();
                     return Ok(IbcBasicResponse::new()
                         .add_attribute("method", "ibc_packet_ack")
-                        .add_message(transfer_msg));
+                        .add_message(transfer_msg)
+                    );
                 }
                 Denom::Cw20(_) => unimplemented!(),
             };
         }
-        PacketMsg::CreateSideB { id: _, swap: _ } => {
+        PacketMsg::CreateLimitB { id:_, limit:_ } => {
             return Ok(IbcBasicResponse::new().add_attribute("action", "ibc_packet_ack"))
-        }
+        },
     }
 }
 

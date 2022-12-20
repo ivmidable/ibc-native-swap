@@ -1,15 +1,15 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Binary, Deps, DepsMut, Env, IbcMsg, MessageInfo, Response, StdResult,
+    to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::Denom;
-use cw_utils::{must_pay, one_coin};
+use cw_utils::{must_pay};
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, PacketMsg, QueryMsg};
-use crate::state::{State, Swap, Token, STATE, SWAPS_A, SWAPS_B, SWAP_ID};
+use crate::state::{Limit, State, Token, LIMITS_A, LIMITS_B, LIMIT_ID, STATE};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:ibc-native-swap";
@@ -30,7 +30,7 @@ pub fn instantiate(
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
-    SWAP_ID.save(deps.storage, &0u64)?;
+    LIMIT_ID.save(deps.storage, &0u64)?;
 
     Ok(Response::new()
         .add_attribute("method", "instantiate")
@@ -45,70 +45,76 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::CreateSwap {
-            ask,
-            deposit_transfer_channel_id,
+        ExecuteMsg::CreateLimit {
+            price_per_token,
+            liquidity_transfer_channel_id,
             ask_transfer_channel_id,
-        } => execute::create(
+        } => execute::create_limit(
             deps,
             env,
             info,
-            ask,
-            deposit_transfer_channel_id,
+            price_per_token,
+            liquidity_transfer_channel_id,
             ask_transfer_channel_id,
         ),
-        ExecuteMsg::AcceptSwap { id } => execute::accept(deps, env, info, id),
+        ExecuteMsg::AcceptLimit { id } => execute::accept_limit(deps, env, info, id),
+        ExecuteMsg::UpdateLimit {
+            id,
+            price_per_token,
+        } => unimplemented!(),
+        ExecuteMsg::RemoveLimit { id } => unimplemented!(),
     }
 }
 
 pub mod execute {
+    use cosmwasm_std::IbcMsg;
 
     use super::*;
 
-    pub fn create(
+    pub fn create_limit(
         deps: DepsMut,
         env: Env,
         info: MessageInfo,
-        ask: Token,
-        deposit_transfer_channel_id: String,
-        ask_transfer_channel_id: String,
+        _price_per_token: Token,
+        _liquidity_transfer_channel_id: String,
+        _ask_transfer_channel_id: String,
     ) -> Result<Response, ContractError> {
-        one_coin(&info).unwrap();
-
         let state = STATE.load(deps.storage)?;
 
-        let swap_id = SWAP_ID.load(deps.storage)?;
-        let swap = Swap {
-            deposit: Token {
+        let limit_id = LIMIT_ID.load(deps.storage)?;
+
+        let limit = Limit {
+            liquidty: Token {
                 denom: Denom::Native(info.funds[0].denom.clone()),
                 amount: info.funds[0].amount,
             },
-            deposit_address: info.sender.clone(),
-            deposit_transfer_channel_id,
-            ask: ask,
-            ask_address: None,
-            ask_transfer_channel_id,
+            liquidity_address: info.sender.clone(),
+            price_per_token: _price_per_token,
+            liquidity_transfer_channel_id: _liquidity_transfer_channel_id,
+            ask_transfer_channel_id: _ask_transfer_channel_id,
         };
 
-        let packet = PacketMsg::CreateSideB {
-            id: swap_id,
-            swap: swap.clone(),
+        LIMITS_A.save(deps.storage, limit_id, &limit)?;
+
+        LIMIT_ID.save(deps.storage, &(limit_id.checked_add(1).unwrap()))?;
+
+        let packet = PacketMsg::CreateLimitB {
+            id: limit_id,
+            limit: limit.clone(),
         };
+
         let msg = IbcMsg::SendPacket {
             channel_id: state.endpoint.unwrap().channel_id,
             data: to_binary(&packet)?,
             timeout: env.block.time.plus_seconds(state.packet_lifetime).into(),
         };
 
-        SWAPS_A.save(deps.storage, swap_id, &swap)?;
-        SWAP_ID.save(deps.storage, &(swap_id.checked_add(1).unwrap()))?;
-
         Ok(Response::new()
             .add_message(msg)
-            .add_attribute("method", "create_swap"))
+            .add_attribute("method", "create_limit"))
     }
 
-    pub fn accept(
+    pub fn accept_limit(
         deps: DepsMut,
         env: Env,
         info: MessageInfo,
@@ -116,30 +122,26 @@ pub mod execute {
     ) -> Result<Response, ContractError> {
         let state = STATE.load(deps.storage)?;
 
-        let swap = SWAPS_B.load(deps.storage, id)?;
+        let limit = LIMITS_B.load(deps.storage, id)?;
 
-        if swap.ask_address.is_some() {
-            if info.sender.to_string() != swap.ask_address.unwrap() {
-                return Err(ContractError::Unauthorized {});
-            }
-        }
-
-        match swap.ask.denom {
+        match limit.price_per_token.denom {
             Denom::Native(denom) => {
                 must_pay(&info, &denom).unwrap();
             }
             Denom::Cw20(_) => unimplemented!(),
         };
 
-        if swap.ask.amount > info.clone().funds[0].amount {
+        //make sure they send in atleast enough to buy one token on the other side
+        if limit.price_per_token.amount > info.clone().funds[0].amount {
             return Err(ContractError::InsufficientFunds {});
         }
 
         let channel_id = state.endpoint.unwrap().channel_id;
 
-        let accept_msg = PacketMsg::AcceptSideA {
+        let accept_msg = PacketMsg::AcceptLimitA {
             id,
             sender: info.sender.to_string(),
+            amount: info.funds[0].amount,
         };
 
         let packet_msg = IbcMsg::SendPacket {
@@ -150,14 +152,14 @@ pub mod execute {
 
         Ok(Response::new()
             .add_message(packet_msg)
-            .add_attribute("method", "accept_swap"))
+            .add_attribute("method", "accept_limit"))
     }
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetSwap { side, id } => to_binary(&query::get_swap(deps, side, id)?),
+        QueryMsg::GetLimitOrder { side, id } => to_binary(&query::get_limit_order(deps, side, id)?),
     }
 }
 
@@ -166,11 +168,11 @@ pub mod query {
 
     use super::*;
 
-    pub fn get_swap(deps: Deps, side: String, id: u64) -> StdResult<Swap> {
+    pub fn get_limit_order(deps: Deps, side: String, id: u64) -> StdResult<Limit> {
         if side == "A".to_string() {
-            return Ok(SWAPS_A.load(deps.storage, id)?);
+            return Ok(LIMITS_A.load(deps.storage, id)?);
         } else if side == "B".to_string() {
-            return Ok(SWAPS_B.load(deps.storage, id)?);
+            return Ok(LIMITS_B.load(deps.storage, id)?);
         } else {
             return Err(StdError::generic_err("Invalid side"));
         }

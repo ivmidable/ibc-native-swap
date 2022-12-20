@@ -306,7 +306,7 @@ describe("ibc-tests", () => {
 
     });
 
-    it("ibc orderbook limit order", async () => {
+    xit("ibc orderbook limit order", async () => {
         const {
             osmoClient,
             wasmClient,
@@ -378,5 +378,13 @@ describe("ibc-tests", () => {
         console.log(wasmQuery2);
         let osmoQuery2 = await osmoClient.sign.queryContractSmart(osmoLimit, { get_limit_order: { side: "B", id: 0 } });
         console.log(osmoQuery2);
+    });
+
+    it("ibc swap create two swaps, one on wasmd and the other on osmos then accept swaps", async () => {
+    
+    });
+
+    it("ibc orderbook create two limit orders, one on wasmd and the other on osmos then accept limit orders", async () => {
+        
     });
 });

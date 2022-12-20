@@ -1,11 +1,11 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    to_binary, Binary, Deps, DepsMut, Env, IbcMsg, MessageInfo, Response, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::Denom;
-use cw_utils::{must_pay};
+use cw_utils::must_pay;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, PacketMsg, QueryMsg};
@@ -67,8 +67,6 @@ pub fn execute(
 }
 
 pub mod execute {
-    use cosmwasm_std::IbcMsg;
-
     use super::*;
 
     pub fn create_limit(

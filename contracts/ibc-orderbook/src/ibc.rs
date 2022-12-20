@@ -186,15 +186,14 @@ pub fn ibc_packet_ack(
                     LIMITS_B.save(deps.storage, id, &limit).unwrap();
                     return Ok(IbcBasicResponse::new()
                         .add_attribute("method", "ibc_packet_ack")
-                        .add_message(transfer_msg)
-                    );
+                        .add_message(transfer_msg));
                 }
                 Denom::Cw20(_) => unimplemented!(),
             };
         }
-        PacketMsg::CreateLimitB { id:_, limit:_ } => {
+        PacketMsg::CreateLimitB { id: _, limit: _ } => {
             return Ok(IbcBasicResponse::new().add_attribute("action", "ibc_packet_ack"))
-        },
+        }
     }
 }
 

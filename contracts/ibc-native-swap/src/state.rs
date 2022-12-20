@@ -1,7 +1,7 @@
 use cosmwasm_schema::cw_serde;
 use cw20::Denom;
 
-use cosmwasm_std::{Addr, Coin, IbcEndpoint, Uint128};
+use cosmwasm_std::{Addr, IbcEndpoint, Uint128};
 use cw_storage_plus::{Item, Map};
 
 #[cw_serde]
